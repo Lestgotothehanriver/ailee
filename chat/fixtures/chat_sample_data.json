@@ -1,0 +1,33 @@
+[{
+    "model": "chat.chatsession",
+    "pk": 1,
+    "fields": {
+      "character": 1,
+      "user": 1,
+      "summary": "시험 기간 스트레스",
+      "topic": "EmotionRegulation",
+      "start_time": "2025-06-25T13:00:00Z",
+      "time": "2025-06-25T13:30:00Z"
+    }
+  },
+  {
+    "model": "chat.message",
+    "pk": 1,
+    "fields": {
+      "session": 1,
+      "sender": "user",
+      "message": "요즘 공부가 너무 안 돼. 불안해서 잠도 잘 못 자.",
+      "order": 0
+    }
+  },
+  {
+    "model": "chat.message",
+    "pk": 2,
+    "fields": {
+      "session": 1,
+      "sender": "model",
+      "message": "공부가 잘 안 되는 건 누구에게나 있을 수 있어. 특히 어떤 부분이 가장 힘들게 느껴져?",
+      "order": 1
+    }
+  }
+]

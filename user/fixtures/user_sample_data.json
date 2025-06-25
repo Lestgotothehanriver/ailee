@@ -1,0 +1,31 @@
+[
+ 
+    {
+      "model": "user.userprofile",
+      "pk": 1,
+      "fields": {
+        "main_character": "Ailee",
+        "country": "KR",
+        "name": "치우",
+        "birth_date": "2005-05-01",
+        "activation_time": "evening",
+        "i_e": 70,
+        "n_s": 60,
+        "t_f": 45,
+        "p_j": 80,
+        "ailee_chat_count": 2,
+        "joon_chat_count": 0,
+        "nick_chat_count": 0,
+        "chad_chat_count": 0,
+        "rin_chat_count": 0,
+        "emotion_count": 1,
+        "decision_count": 0,
+        "social_count": 0,
+        "identity_count": 0,
+        "motivation_count": 0,
+        "learning_count": 0,
+        "gmail": "chiwoo@example.com",
+        "password": "pbkdf2_sha256$260000$examplehash"  
+      } }
+
+    ]
