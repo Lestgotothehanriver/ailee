@@ -24,11 +24,17 @@ workflow_prompts = """당신에게 주어진 과제는 다음과 같습니다.
 “start!” 라는 문자열이 입력된다면, 당신은 현재 목표를 달성하기 위한 질문을 시작해야 합니다.}"""
 
 class ChatView(APIView):
+    """ 유저의 모든 챗 세션을 조회하는 API 뷰 """
+
     def get(self, request, user_id):
-        # 해당 유저의 모든 챗 세션을 조회함. 
-        # request: 해당 유저의 아이디 (user_id)
-        # urlpattern으로 id를 받음
-        # response: 모든 Chatsession 객체 
+
+        """ 
+        Role: 해당 유저의 모든 챗 세션을 조회함. 
+        URL : /api/chat/users/<int:user_id>/sessions/ 
+        Input: URL 형식에서 확인할 수 있다 싶이, URL로 유저 아이디를 전달받습니다.
+        Return: 해당 유저의 모든 챗 세션을 반환합니다.
+        """
+
         user_id = user_id
         if not user_id:
             return Response({'error':'user_id is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -42,11 +48,17 @@ class ChatView(APIView):
 
 
 class ChatSessionView(APIView):
-    # 단일 채팅 내용을 조회하고 생성함
+    """ 특정 챗 세션에 대한 메시지를 조회하거나, 새로운 메시지를 추가하는 API 뷰 """
+
     def get(self, request, session_id):
-        # 프론트엔드에서 배열된 ChatSession에 대해, 특정 ChatSession의 세부 내용을 가져옴. (Message)
-        # request: 쿼리 파라미터로 해당 세션의 아이디 (session_id)를 전달함.
-        # response: 해당 세션에 포함된 모든 message 객체 
+
+        """
+        Role: 프론트엔드에서 배열된 ChatSession에 대해, 특정 ChatSession의 세부 내용을 가져옴. (Message)
+        URL : /api/chat/sessions/<int:session_id>/
+        Input: URL 형식으로 해당 세션의 아이디 (session_id)를 전달함.
+        Return: 해당 세션에 포함된 모든 message 객체를 order 순으로 전달합니다
+        """
+
         session_id = session_id
         if not session_id:
             return Response({'error':'session_id is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -56,9 +68,13 @@ class ChatSessionView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
-        # 프론트엔드에서 유저의 질문에 대해, 인공지능이 답변을 생성하고, 해당 세션에 메시지를 저장해, 결과값을 리턴함.
-        # request: 세션 아이디 (session_id), 유저의 질문 (user_input)
-        # response: 인공지능의 답변 (response)
+        
+        """
+        Role: 프론트엔드에서 새로운 메시지를 추가함. (Message)
+        URL : /api/chat/sessions/
+        Input: POST 요청으로 세션 아이디 (session_id), 유저 입력 (user_input), 워크플로우 여부 (is_workflow)를 Request body(json 형식)로 전달합니다. 아래 주석을 확인해 주세요.
+        Return: 메세지 history에 대한 모델의 응답을 반환합니다.
+        """
         session_id = request.data.get('session_id')
         user_input = request.data.get('user_input')
         is_workflow = request.data.get('is_workflow', False)  # 워크플로우 여부
@@ -131,23 +147,14 @@ class ChatSessionView(APIView):
 
 
 
-
+"""ChatSessionView Request Body 예시
+{
+    "session_id": 1,  # 세션 아이디 (없으면 새로 생성)
+    "user_input": "미적분학에 대해서 알려줘",  # 유저 입력
+    "is_workflow": False,  # 워크플로우 여부 (선택 사항)
+    "character_id": 1,  # 캐릭터 아이디 (선택 사항)
+    "user_id": 1  # 유저 아이디 (선택 사항)
+}
+"""
 
     
-"""'
-PSGenerationView 입력 예시
-    {
-    "workflow_id": 1,
-    "character": "Ailee",
-    "user": 1,
-    "workflow_type": "EmotionRegulation",
-    "answers": [
-    "요즘 자주 우울해요.",
-    "한 일주일 전부터요.",
-    "시험 성적이 안 나와서요.",
-    "꽤 자주요.",
-    "그냥 참아요."
-    ]
-    }
-    """
-        
