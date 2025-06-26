@@ -88,7 +88,7 @@ class UserLoginView(APIView):
     사용자 로그인 API
     """
     def post(self, request):
-        
+
         """
         Role: 사용자 로그인을 처리합니다.
         URL : /api/user/login/
@@ -107,3 +107,6 @@ class UserLoginView(APIView):
 
 
 
+"""사용자 프로필 생성 json 예시
+
+{"""
