@@ -9,7 +9,9 @@ from .models import ChatSession, Message
 from character.models import Character
 from .serializers import ChatSerializer, MessageSerializer
 import google.generativeai as genai
-import pandas as pd
+from dotenv import load_dotenv
+load_dotenv() 
+
 genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 # Create your views here.
 

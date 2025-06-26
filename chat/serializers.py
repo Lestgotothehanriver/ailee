@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import ChatSession, Message
-from character.models import Character, WorkFlow, WorkFlowStep
+from character.models import Character
 
 class ChatSerializer(serializers.ModelSerializer):
     model = ChatSession
