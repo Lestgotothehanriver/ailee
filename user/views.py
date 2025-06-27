@@ -22,7 +22,7 @@ class UserCreateView(APIView):
         """
 
         email = request.data.get("email")
-        passwoard = request.data.get("password")
+        password = request.data.get("password")
         name = request.data.get("name")    
         main_character = request.data.get("main_character")
         country = request.data.get("country")
@@ -76,7 +76,7 @@ class UserProfileView(APIView):
         Return: 수정된 사용자 프로필 정보를 반환합니다.
         """
 
-        user_profile = UserProflie.objects.get(id=user_id)
+        user_profile = UserProfile.objects.get(id=user_id)
         serializer  = UserProfileSerializer(user_profile, data = request.data, partial = True)
         if serializer.is_valid():
             serializer.save()

@@ -48,3 +48,19 @@ class UserProfile(models.Model):
 
     gmail = models.EmailField(max_length=254)
     password = models.CharField(max_length=128)
+
+    following = models.ManyToManyField('self', symmetrical=False, related_name='followers', blank=True)
+
+"""# A가 B를 팔로우
+a = UserProfile.objects.get(id=1)
+b = UserProfile.objects.get(id=2)
+a.following.add(b)
+
+# A가 팔로우하는 사람들
+a_following = a.following.all()
+
+# B를 팔로우하고 있는 사람들
+b_followers = b.followers.all()
+
+# 언팔로우
+a.following.remove(b)"""

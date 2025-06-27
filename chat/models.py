@@ -26,6 +26,7 @@ class ChatSession(models.Model):
     )
     start_time = models.DateTimeField(default=timezone.now)
     time = models.DateTimeField()
+    is_workflow = models.BooleanField(default=False)
 
 class Message(models.Model):
     SENDER_CHOICES = [

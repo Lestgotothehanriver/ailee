@@ -23,7 +23,7 @@ workflow_prompts = """당신에게 주어진 과제는 다음과 같습니다.
 규칙:
 당신의 답변은 크게 두 가지 종류로 나뉩니다.
 1. 최종 답변: 현재 단계에서 문제를 해결하기 위한 모든 정보가 수집되었다고 판단될 경우에는, 최종 답변을 출력합니다. 최종 답변은 당신의 캐릭터에 맞게 답변을 해야 하며, 사용자로부터 획득한 모든 정보를 바탕으로 자세하게 해결책을 제시해야 합니다.
-2. 질문: 정보가 충분하지 않다고 판단될 때는 질문을 계속 이어갑니다. 질문을 짧고 간결하게 하나의 정보만 물어봐야 하며, 필요한 경우 선택지를 2-3개정도 제공해 사용자가 어려움 없이 문제 해결을 위한 정보를 제공하도록 해주세요.
+2. 질문: 정보가 충분하지 않다고 판단될 때는 질문을 계속 이어갑니다. 반드시 질문을 짧고 간결하게, 하나의 정보만 구체적으로 물어봐야 하며, 반드시 선택지를 2-5개정도 제공해 사용자가 어려움 없이 문제 해결을 위한 정보를 제공하도록 해주세요.
 “start!” 라는 문자열이 입력된다면, 당신은 현재 목표를 달성하기 위한 질문을 시작해야 합니다.}"""
 
 class ChatView(APIView):
@@ -50,7 +50,7 @@ class ChatView(APIView):
         return Response(serializer.data)
 
 
-class ChatSessionView(APIView):
+class ChatSessionGetView(APIView):
     """ 특정 챗 세션에 대한 메시지를 조회하거나, 새로운 메시지를 추가하는 API 뷰 """
 
     def get(self, request, session_id):
@@ -70,6 +70,8 @@ class ChatSessionView(APIView):
         serializer = MessageSerializer(messages, many=True)
         return Response(serializer.data)
 
+class ChatSessionPostView(APIView):
+
     def post(self, request):
         
         """
@@ -81,7 +83,6 @@ class ChatSessionView(APIView):
         session_id = request.data.get('session_id')
         user_input = request.data.get('user_input')
         is_workflow = request.data.get('is_workflow', False)  # 워크플로우 여부
-        is_fa= False
 
 
         # 세션이 존재하지 않는 경우 새로 생성함
@@ -91,8 +92,11 @@ class ChatSessionView(APIView):
                 user_id=request.data.get('user_id'),
                 topic="None",
                 time=timezone.now(),
-                start_time = timezone.now()
+                start_time = timezone.now(),
+                is_workflow=is_workflow
             )
+            session_id = session.id  # 새로 생성된 세션의 ID
+            user_input = "start!" if is_workflow else user_input  # 워크플로우 시작 메시지 설정
             messages = []
             order = 0
 
@@ -112,8 +116,12 @@ class ChatSessionView(APIView):
         system_prompt = character.system_prompt
         if is_workflow:
             system_prompt += "\n" + workflow_prompts
+            
 
-        model = genai.GenerativeModel(model_name='gemini-1.5-pro', system_instruction=system_prompt)
+        model = genai.GenerativeModel(
+        model_name='gemini-2.5-flash',  # 또는 'gemini-1.5-flash'가 아니라면 'gemini-2.5-flash' 시도
+        system_instruction=system_prompt
+        )
         if messages:
             chat = model.start_chat(history=history)
         else:
@@ -124,7 +132,7 @@ class ChatSessionView(APIView):
             response = chat.send_message(user_input)
             if response.text[0:2] == 'fa':
                 response.text = response.text[2:]
-                is_fa = True 
+                session.is_workflow = False
 
             model_output = response.text
         except Exception as e:
@@ -139,13 +147,17 @@ class ChatSessionView(APIView):
             user = session.user
             country = user.country.name if user.country else "Unknown"
 
-            system_prompt = f"please summarize the following conversation in a concise manner. The user is from {country}"
-            summary_chat = model.start_chat(system_instruction=system_prompt)
+            system_prompt = f"Please summarize the following conversation into 1–3 concise keywords that represent the core topic or request. The user is from {country}."
+            model = genai.GenerativeModel(
+            model_name='gemini-2.5-flash',  # 또는 'gemini-1.5-flash'가 아니라면 'gemini-2.5-flash' 시도
+            system_instruction=system_prompt
+            )
+            summary_chat = model.start_chat()
             summary_response = summary_chat.send_message(model_output)
             session.summary = summary_response.text
             session.save() 
 
-        return Response({'response': model_output, 'is_fa':is_fn}, status=status.HTTP_200_OK)
+        return Response({'response': model_output, 'session_id': session_id, 'is_workflow': session.is_workflow}, status=status.HTTP_200_OK)
         
 
 
