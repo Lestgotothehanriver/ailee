@@ -105,8 +105,95 @@ class UserLoginView(APIView):
         except UserProfile.DoesNotExist:
             return Response({"error": "Invalid email or password"}, status=status.HTTP_404_NOT_FOUND)
 
+class UserFollowView(APIView):
+    """
+    사용자 팔로우 API
+    """
+    
+    def post(self, request, user_id):
+        """
+        Role: 사용자를 팔로우합니다.
+        URL: api/user/<int:user_id>/follow/
+        Input: URL형식으로 유저 아이디를 전달하고, Request body에 팔로우할 사용자의 ID를 전달합니다.
+        Return: 팔로우 성공 여부를 반환합니다.
+        """
+
+        current_user_id = user_id
+        target_user_id = request.data.get("user_id")
+        try:
+            current_user = UserProfile.objects.get(id=current_user_id)
+            target_user = UserProfile.objects.bet(id=target_user_id)
+            current_user.following.add(target_user)
+            return Response({'message': 'User followed successfully'}, status = status.HTTP_200_OK)
+
+        except UserProfile.DoesNotExist:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    def delete(self, request, user_id):
+        """
+        Role: 사용자의 팔로우를 취소합니다.
+        URL: api/user/<int:user_id>/follow/
+        Input: URL형식으로 유저 아이디를 전달하고, Request body에 언팔로우할 사용자의 ID를 전달합니다.
+        Return: 언팔로우 성공 여부를 반환합니다.
+        """
+
+        current_user_id = user_id
+        target_user_id = request.data.get("user_id")
+        try:
+            current_user = UserProfile.objects.get(id=current_user_id)
+            target_user = UserProfile.objects.get(id=target_user_id)
+            current_user.following.remove(target_user)
+            return Response({'message': 'User unfollowed successfully'}, status=status.HTTP_200_OK)
+
+        except UserProfile.DoesNotExist:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+class UserFollowingView(APIView):
+    """
+    사용자 팔로우 목록 조회 API
+    """
+
+    def get(self, request, user_id):
+        """
+        Role: 사용자가 팔로우하는 사람들의 목록을 조회합니다.
+        URL: api/user/<int:user_id>/following/
+        Input: URL 형식으로 사용자 ID를 전달합니다.
+        Return: 팔로우하는 사람들의 목록을 반환합니다.
+        """
+
+        user = UserProfile.objects.get(id=user_id)
+        following = user.following.all()
+        serializer = UserProfileSerializer(following, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+class UserFollowerView(APIView):
+    """
+    사용자 팔로워 목록 조회 API
+    """
+
+    def get(self, request, user_id):
+        """
+        Role: 사용자를 팔로우하는 사람들의 목록을 조회합니다.
+        URL: api/user/<int:user_id>/followers/
+        Input: URL 형식으로 사용자 ID를 전달합니다.
+        Return: 팔로워들의 목록을 반환합니다.
+        """
+
+        user = UserProfile.objects.get(id=user_id)
+        followers = user.followers.all()
+        serializer = UserProfileSerializer(followers, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+
+
+        
+
+
+
+
 
 
 """사용자 프로필 생성 json 예시
 
-{"""
+"""

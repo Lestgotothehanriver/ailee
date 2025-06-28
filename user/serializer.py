@@ -12,7 +12,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'ailee_chat_count', 'joon_chat_count',
             'nick_chat_count', 'chad_chat_count', 'rin_chat_count',
             'emotion_count', 'decision_count', 'social_count',
-            'identity_count', 'motivation_count', 'learning_count',
+            'identity_count', 'motivation_count', 'learning_count', 
+            'following'
         )
         read_only_fields = ('id',)  # 추천
         extra_kwargs     = {'password': {'write_only': True}}
