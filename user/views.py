@@ -1,6 +1,6 @@
 from django.shortcuts import render
 from user.models import UserProfile
-from .serializer import UserProfileSerializer
+from .serializers import UserProfileSerializer
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -185,15 +185,17 @@ class UserFollowerView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+class UserSlabView(APIView):
+    """
+    사용자 슬랩 페이지 API
+    """
 
+    def get(self, request, user_id):
+        """
+        Role: 사용자의 슬랩 페이지를 조회합니다.
+        URL: api/user/<int:user_id>/slab/
+        Input: URL 형식으로 사용자 ID를 전달합니다.
+        Return: 사용자의 슬랩 페이지 정보를 반환합니다.
+        """
 
-        
-
-
-
-
-
-
-"""사용자 프로필 생성 json 예시
-
-"""
+        return None

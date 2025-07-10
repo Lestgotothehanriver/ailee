@@ -37,4 +37,6 @@ class Message(models.Model):
     sender = models.CharField(max_length=10, choices=SENDER_CHOICES)
     message = models.TextField()
     order = models.IntegerField()
+    image = models.ImageField(upload_to='chat_images/', blank=True, null=True)
+    citation = models.TextField(blank=True, null=True)
 
