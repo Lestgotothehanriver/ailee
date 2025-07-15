@@ -138,6 +138,7 @@ class ChatSessionPostView(APIView):
         image_file = request.FILES.get('image_file', None)  # 이미지 파일 (선택 사항)
         is_search = request.data.get('is_search', False)  # 검색 여부 (선택 사항)
         file = request.FILES.get('file', None)  # 파일 업로드 (선택 사항)
+        audio = request.FILES.get('audio', None)  # 오디오 파일 업로드 (선택 사항)
 
         # 세션이 존재하지 않는 경우 새로 생성함
         #___________________________________________________________________________________
@@ -210,6 +211,9 @@ class ChatSessionPostView(APIView):
                 file_bytes = file.read()
                 encoded_file = base64.b64encode(file_bytes).decode('utf-8')
                 parts.append({"type": "file", "file": {"data": encoded_file, "name": file.name}})
+            if audio_file:
+                audio_bytes = audio.read()
+                parts.append({"type": "audio", "audio": {"data": audio_bytes, "name": audio.name}})
             response = chat.send_message(parts=parts)
             if response.text[0:2] == 'fa':
                 model_output = response.text[2:]
