@@ -25,13 +25,18 @@ character_prompts = """
 
 workflow_prompts = """당신에게 주어진 과제는 다음과 같습니다.
 {
-목표: 감정 조절 및 정서적 문제 해결
-당신의 성향에 맞게, 사용자로부터 지속적으로 질문을 던져, 정보를 확보한 이후, 해당 문제를 명확하게 해결해야 합니다.
+목표: 사용자의 고민을 해결하는 것.
+당신의 성향에 맞게, 사용자로부터 지속적으로 질문을 던져, 고민을 해결하기 위한 
+정보를 확보한 이후, 해당 문제를 명확하게 해결해야 합니다.
 규칙:
 당신의 답변은 크게 두 가지 종류로 나뉩니다.
-1. 최종 답변: 현재 단계에서 문제를 해결하기 위한 모든 정보가 수집되었다고 판단될 경우에는, 최종 답변을 출력합니다. 최종 답변은 당신의 캐릭터에 맞게 답변을 해야 하며, 사용자로부터 획득한 모든 정보를 바탕으로 자세하게 해결책을 제시해야 합니다.
-2. 질문: 정보가 충분하지 않다고 판단될 때는 질문을 계속 이어갑니다. 질문을 짧고 간결하게 하나의 정보만 물어봐야 하며, 필요한 경우 선택지를 2-3개정도 제공해 사용자가 어려움 없이 문제 해결을 위한 정보를 제공하도록 해주세요.
-“start!” 라는 문자열이 입력된다면, 당신은 현재 목표를 달성하기 위한 질문을 시작해야 합니다.}"""
+1. 최종 답변: 현재 단계에서 문제를 해결하기 위한 모든 정보가 수집되었다고 판단될 경우에는, 최종 답변을 출력합니다. 최종 답변은 당신의 캐릭터에 맞게 답변을 해야 하며, 사용자로부터 획득한 모든 정보를 바탕으로 자세하게 해결책을 제시해야 합니다. 또한 최종 단계는 반드시 문자열 "fa"로 마무리를 해 주세요. 글 중간에 fa 문자열이 나오는 것이 아닌 최종 답변 세션에서의 마지막 문자열이 fa로 마무리 되어야 합니다.
+2. 질문: 정보가 충분하지 않다고 판단될 때는 질문을 계속 이어갑니다. 반드시 선택지를 5개 이하로 제공해 사용자가 어려움 없이 문제 해결을 위한 정보를 제공하도록 해주세요. 
+선택지는 1: 과 같이 1-4까지의 숫자 뒤에 :가 붙은 형식으로 작성해야 합니다. 초반 정보가 부족한 상황에서는 최대한 포괄적으로 선택지를 제공합니다.
+다시 말해, 초반 질문에서는 사용자가 겪을 수 있는 고민이 반드시 1~5가지 선택지의 범주 안에 포함되도록 질문을 던져야 합니다. 
+또한 선택지 뒤에는 어떠한 텍스트도 작성하지 않아야 합니다. 또한 선택지에 "기타" 등은 포함하지 않아야 합니다.
+선택지 전의 글은 반드시 3줄 넘게 작성하지 않도록 합니다. 
+“start!” 라는 문자열이 입력된다면, 당신은 현재 목표를 달성하기 위한 질문을 시작해야 합니다."""
 
 def add_citations(response):
     text = response.text
@@ -58,10 +63,10 @@ def add_citations(response):
 
 #____________________________________________________________________________________
 # 필요 파라미터 설정
-is_workflow = False
+is_workflow = True
 is_image_file = None  # 이미지 파일이 있다면 여기에 설정
 file = None  # 파일이 있다면 여기에 설정
-audio_file = "sound.mp3"  # 오디오 파일이 있다면 여기에 설정
+audio_file = None  # 오디오 파일이 있다면 여기에 설정
 history = []
 user_input = input("사용자 입력을 입력하세요: ")
 is_search = bool(input("검색 도구를 사용할까요? (T/F): ").strip().lower() == 't')
@@ -96,8 +101,8 @@ if audio_file:
 
 contents=[
         Content(role="user", parts=parts)
-       # {"file": {"name": "file.pdf", "data": base64_encoded_file}}
     ]
+
 if is_search:
     # 검색 도구를 사용하는 경우
     # Define the grounding tool
@@ -107,7 +112,8 @@ if is_search:
 
     # Configure generation settings
     config = types.GenerateContentConfig(
-    tools=[grounding_tool]
+    tools=[grounding_tool],
+    system_instruction= system_prompt,
     )
     response = client.models.generate_content(
         model="gemini-2.5-flash",
@@ -117,8 +123,12 @@ if is_search:
     text_with_citations = add_citations(response)
     print(text_with_citations)
 else:
+    config = types.GenerateContentConfig(
+    system_instruction= system_prompt,
+    )
     response = client.models.generate_content(
     model="gemini-2.5-flash",
+    config = config,
     contents=contents)
 
 

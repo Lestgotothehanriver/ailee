@@ -38,5 +38,13 @@ class Message(models.Model):
     message = models.TextField()
     order = models.IntegerField()
     image = models.ImageField(upload_to='chat_images/', blank=True, null=True)
-    citation = models.TextField(blank=True, null=True)
+    file = models.FileField(upload_to='chat_files/', blank=True, null=True)
+    audio = models.FileField(upload_to='chat_audio/', blank=True, null=True)
+    is_workflow = models.BooleanField(default=False)
+
+class Citation(models.Model):
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='citations')
+    text = models.TextField()
+    uri = models.URLField()
+
 

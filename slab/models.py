@@ -20,7 +20,7 @@ class Post(models.Model):
     title = models.CharField(max_length=200, blank=True, null=True)
     content = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
-    views = 
+    views = models.PositiveIntegerField(default=0)
 
 class Answer(models.Model):
     post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='answers')
