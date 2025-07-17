@@ -4,16 +4,15 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.utils import timezone 
 from django.shortcuts import get_object_or_404
-from rest_framework.parsers import JSONParser, MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser
 #___________________________________________________________________________________
 from user.models import UserProfile as User
-from .models import ChatSession, Message, Image, File, Audio, Citation
+from .models import ChatSession, Message
 from character.models import Character
 from .serializers import ChatSerializer, MessageSerializer
 #___________________________________________________________________________________
-import google.generativeai as generativeai
+import google.generativeai as genai
 from google.genai import types
-from google import genai
 from google.genai.types import Part, Content
 #___________________________________________________________________________________
 from dotenv import load_dotenv
@@ -21,10 +20,8 @@ import os
 import re
 import base64
 import mimetypes
-from distutils.util import strtobool
 load_dotenv() 
-generativeai.configure(api_key=os.environ["GEMINI_API_KEY"])
-client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+genai.configure(api_key=os.environ["GEMINI_API_KEY"])
 #___________________________________________________________________________________
 # Create your views here.
 
@@ -38,19 +35,11 @@ workflow_prompts = """당신에게 주어진 과제는 다음과 같습니다.
 1. 최종 답변: 현재 단계에서 문제를 해결하기 위한 모든 정보가 수집되었다고 판단될 경우에는, 최종 답변을 출력합니다. 최종 답변은 당신의 캐릭터에 맞게 답변을 해야 하며, 사용자로부터 획득한 모든 정보를 바탕으로 자세하게 해결책을 제시해야 합니다. 또한 최종 단계는 반드시 문자열 "fa"로 시작해 주세요. 글 중간에 fa 문자열이 나오는 것이 아닌 최종 답변 세션에서의 첫 두개의 문자열이 fa로 시작되어야 합니다.
 2. 질문: 정보가 충분하지 않다고 판단될 때는 질문을 계속 이어갑니다. 반드시 선택지를 5개 이하로 제공해 사용자가 어려움 없이 문제 해결을 위한 정보를 제공하도록 해주세요. 
 선택지는 1: 과 같이 1-4까지의 숫자 뒤에 :가 붙은 형식으로 작성해야 합니다. 초반 정보가 부족한 상황에서는 최대한 포괄적으로 선택지를 제공합니다.
-다시 말해, 초반 질문에서는 사용자가 겪을 수 있는 고민이 반드시 1~4가지 선택지의 범주 안에 포함되도록 질문을 던져야 합니다. 
+다시 말해, 초반 질문에서는 사용자가 겪을 수 있는 고민이 반드시 1~5가지 선택지의 범주 안에 포함되도록 질문을 던져야 합니다. 
 또한 선택지 뒤에는 어떠한 텍스트도 작성하지 않아야 합니다. 또한 선택지에 "기타" 등은 포함하지 않아야 합니다.
 선택지 전의 글은 반드시 3줄 넘게 작성하지 않도록 합니다. 
 “start!” 라는 문자열이 입력된다면, 당신은 현재 목표를 달성하기 위한 질문을 시작해야 합니다.}"""
-
-
-def to_bool(val):
-    if val in (True, False, None):
-        return val
-    try:
-        return bool(strtobool(str(val).strip()))
-    except ValueError:
-        return None  
+      
 
 #___________________________________________________________________________________        
 class ChatView(APIView):
@@ -122,7 +111,7 @@ class ChatSessionGetView(APIView):
 class ChatSessionPostView(APIView):
 
     """ 새로운 챗 세션을 생성하거나, 기존 챗 세션에 메시지를 추가하는 API 뷰 """
-    parser_classes = (JSONParser, MultiPartParser, FormParser)
+    parser_classes = (MultiPartParser, FormParser)
         
     def post(self, request):
         
@@ -137,9 +126,9 @@ class ChatSessionPostView(APIView):
         #___________________________________________________________________________________
         session_id = request.data.get('session_id')
         user_input = request.data.get('user_input')
-        is_workflow = to_bool(request.data.get('is_workflow', None))  # 워크플로우 여부
-        is_search = to_bool(request.data.get('is_search', False))  # 검색 여부 (선택 사항)
-        images = request.FILES.getlist('images', None)  # 이미지 파일 (선택 사항)
+        is_workflow = request.data.get('is_workflow', None)  # 워크플로우 여부
+        is_search = request.data.get('is_search', False)  # 검색 여부 (선택 사항)
+        images = request.FILES.get('images', None)  # 이미지 파일 (선택 사항)
         files = request.FILES.get('files', None)  # 파일 업로드 (선택 사항)
         audios = request.FILES.get('audios', None)  # 오디오 파일 업로드 (선택 사항)
 
@@ -156,7 +145,7 @@ class ChatSessionPostView(APIView):
             )
             session_id = session.id  # 새로 생성된 세션의 ID
             user_input = "start!" if is_workflow else user_input  # 워크플로우 시작 메시지 설정
-            history = []
+            messages = []
             order = 0
 
         # 세션이 존재하는 경우 해당 세션을 가져옴 + 대화 히스토리 호출
@@ -175,9 +164,9 @@ class ChatSessionPostView(APIView):
                     #___________________________________________________________________________________
                     if m.images:
                         for image in m.images.all():
-                            with open(image.image.path, 'rb') as img_file:
+                            with open(m.image.path, 'rb') as img_file:
                                 img_bytes = img_file.read()
-                            mime_type = mimetypes.guess_type(image.image.path)[0]
+                            mime_type = mimetypes.guess_type(m.image.path)
                             img_data = types.Part.from_bytes(data=img_bytes, mime_type=mime_type)
                             parts.append(img_data)
                     #___________________________________________________________________________________
@@ -185,7 +174,7 @@ class ChatSessionPostView(APIView):
                         for file in m.files.all():
                             with open(m.file.path, 'rb') as file_obj:
                                 file_bytes = file_obj.read()
-                            mime_type = mimetypes.guess_type(m.file.path)[0]
+                            mime_type = mimetypes.guess_type(m.file.path)
                             file_data = types.Part.from_bytes(data=file_bytes, mime_type= mime_type)
                             parts.append(file_data)
                     #___________________________________________________________________________________
@@ -193,7 +182,7 @@ class ChatSessionPostView(APIView):
                         for audio in m.audios.all():
                             with open(m.audio.path, 'rb') as audio_obj:
                                 audio_bytes = audio_obj.read()
-                            mime_type = mimetypes.guess_type(m.audio.path)[0]
+                            mime_type = mimetypes.guess_type(m.audio.path)
                             audio_data = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
                             parts.append(audio_data)
                     #___________________________________________________________________________________
@@ -228,19 +217,19 @@ class ChatSessionPostView(APIView):
 
             if images:
                 for image in images:
-                    mime_type = mimetypes.guess_type(image.name)[0]
+                    mime_type = mimetypes.guess_type(image.name)
                     parts.append(Part.from_bytes(data=image.read(), mime_type=mime_type))
-            if files:
+            if file:
                 for file in files:
-                    mime_type = mimetypes.guess_type(file.name)[0]
+                    mime_type = mimetypes.guess_type(file.name)
                     parts.append(Part.from_bytes(data=file.read(), mime_type=mime_type))
-            if audios:
+            if audio:
                 for audio in audios:
-                    mime_type = mimetypes.guess_type(audio.name)[0]
+                    mime_type = mimetypes.guess_type(audio.name)
                     parts.append(Part.from_bytes(data=audio.read(), mime_type=mime_type))
 
             history.append(Content(role="user", parts=parts))
-            response = client.models.generate_content(
+            response = genai.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=history,
                 config=config
@@ -253,7 +242,7 @@ class ChatSessionPostView(APIView):
                 user = session.user
                 country = user.country.name if user.country else "Unknown"
                 system_prompt = f"Summarize the following conversation in one short sentence (less then 5 word) that clearly conveys the user's main intent or request. Be specific and avoid vague or generic summaries. The user is from {country}.You should use the language of the user."
-                model = generativeai.GenerativeModel(
+                model = genai.GenerativeModel(
                 model_name='gemini-2.5-flash',  
                 system_instruction=system_prompt
                 )
@@ -267,51 +256,29 @@ class ChatSessionPostView(APIView):
 
             else:
                 model_output = response.text
-
-            if is_search:
-                citations = []
-                titles = []
-                chunks = response.candidates[0].grounding_metadata.grounding_chunks
-                if chunks:
+                if is_search:
+                    citations = []
+                    titles = []
+                    chunks = response.candidates[0].grounding_metadata.grounding_chunks
                     for chunk in chunks:
-                        uri = chunk.web.uri
-                        title = chunk.web.title
-                        citations.append(uri)
+                        uri = chunk['web']['uri']
+                        title = chunk['web']['title']
+                        citation.append(uri)
                         titles.append(title)
-
 
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # 메시지 저장
         #___________________________________________________________________________________
-        message = Message.objects.create(session=session, 
+        Message.objects.create(session=session, 
             sender='user',
             message=user_input, 
             order=order, 
+            image=image_file if image_file else None, 
+            file=file if file else None,
+            audio=audio_file if audio_file else None,
             is_workflow=is_workflow)
-
-        if images:
-            for image in images:
-                Image.objects.create(
-                    message=message,
-                    image=image,
-                    caption=""
-                )
-        if files:
-            for file in files:
-                File.objects.create(
-                    message=message,
-                    file=file,
-                    description=""
-                )
-        if audios:
-            for audio in audios:
-                Audio.objects.create(
-                    message=message,
-                    audio=audio,
-                    description=""
-                )
 
         if is_search:
             output = Message.objects.create(
@@ -319,8 +286,11 @@ class ChatSessionPostView(APIView):
                 sender='model', 
                 message=model_output, 
                 order=order + 1,
+                image=None, 
+                file=None, 
+                audio=None
             )
-            search_result = list(zip(citations, titles))
+            search_result = zip(citations, titles)
             for (citation, title) in search_result:
                 Citation.objects.create(
                     message=output, 
@@ -331,15 +301,17 @@ class ChatSessionPostView(APIView):
             Message.objects.create(session=session, 
                 sender='model', 
                 message=model_output,
-                order=order + 1,)
-            search_result = []
+                order=order + 1, 
+                image=None, 
+                file=None,
+                audio=None)
 
         # 만약 처음 생성하는 워크플로우가 아닌 메세지라면, 메세지 요약본을 생성해 저장.
         if order == 0 and not session.is_workflow:
             user = session.user
             country = user.country.name if user.country else "Unknown"
             system_prompt = f"Summarize the following conversation in one short sentence (less then 5 word) that clearly conveys the user's main intent or request. Be specific and avoid vague or generic summaries. The user is from {country}."
-            model = generativeai.GenerativeModel(
+            model = genai.GenerativeModel(
             model_name='gemini-2.5-flash',  
             system_instruction=system_prompt
             )
@@ -370,8 +342,8 @@ class ChatSessionPutView(APIView):
     def put(self, request, session_id, order):
         """
         Role: 프론트엔드에서 특정 챗 세션의 메시지를 수정해, 이후의 대화 (order 기준) 내역을 삭제한뒤, 해당 메시지에 대한 새로운 응답을 생성해 반환함.
-        URL : /api/chat/sessions/<int:session_id>/<int:order>/
-        Input: URL 형식으로 해당 세션의 아이디 (session_id)와 해당 세션에서의 order를 전달하고, Request body로 수정할 메시지 내용을 전달합니다. 
+        URL : /api/chat/sessions/<int:session_id>/
+        Input: URL 형식으로 해당 세션의 아이디 (session_id)를 전달하고, Request body로 수정할 메시지 내용을 전달합니다. 
         Return: 성공적으로 수정되었다는 메시지를 반환합니다.
         """
 
@@ -399,30 +371,30 @@ class ChatSessionPutView(APIView):
             parts = [Part(text=m.message)]
             #___________________________________________________________________________________
             if m.images:
-                for image in m.images.all():
-                    with open(image.image.path, 'rb') as img_file:
+                for image in images:
+                    with open(m.image.path, 'rb') as img_file:
                         img_bytes = img_file.read()
-                    mime_type = mimetypes.guess_type(image.image.path)[0]
+                    mime_type = mimetypes.guess_type(m.image.path)
                     img_data = types.Part.from_bytes(data=img_bytes, mime_type=mime_type)
                     parts.append(img_data)
             #___________________________________________________________________________________
-            if m.files:
-                for file in m.files.all():
+            if m.file:
+                for file in files:
                     with open(m.file.path, 'rb') as file_obj:
                         file_bytes = file_obj.read()
-                    mime_type = mimetypes.guess_type(m.file.path)[0]
+                    mime_type = mimetypes.guess_type(m.file.path)
                     file_data = types.Part.from_bytes(data=file_bytes, mime_type= mime_type)
                     parts.append(file_data)
             #___________________________________________________________________________________
-            if m.audios:
-                for audio in m.audios.all():
+            if m.audio:
+                for audio in audios:
                     with open(m.audio.path, 'rb') as audio_obj:
                         audio_bytes = audio_obj.read()
-                    mime_type = mimetypes.guess_type(m.audio.path)[0]
+                    mime_type = mimetypes.guess_type(m.audio.path)
                     audio_data = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
                     parts.append(audio_data)
             #___________________________________________________________________________________
-            history.append(Content(role=m.sender.lower(), parts=parts))    
+            history.append(Content(role=m.sender.lower(), parts=parts))  
 
         # 워크플로우 여부, 검색 여부 등 세부 사항 설정 (생성 준비 단계)
         #___________________________________________________________________________________     
@@ -453,19 +425,19 @@ class ChatSessionPutView(APIView):
 
             if images:
                 for image in images:
-                    mime_type = mimetypes.guess_type(image.name)[0]
+                    mime_type = mimetypes.guess_type(image.name)
                     parts.append(Part.from_bytes(data=image.read(), mime_type=mime_type))
             if files:
                 for file in files:
-                    mime_type = mimetypes.guess_type(file.name)[0]
+                    mime_type = mimetypes.guess_type(file.name)
                     parts.append(Part.from_bytes(data=file.read(), mime_type=mime_type))
-            if audios:
+            if audio:
                 for audio in audios:
-                    mime_type = mimetypes.guess_type(audio.name)[0]
+                    mime_type = mimetypes.guess_type(audio.name)
                     parts.append(Part.from_bytes(data=audio.read(), mime_type=mime_type))
 
             history.append(Content(role="user", parts=parts))
-            response = client.models.generate_content(
+            response = genai.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=history,
                 config=config
@@ -478,7 +450,7 @@ class ChatSessionPutView(APIView):
                 user = session.user
                 country = user.country.name if user.country else "Unknown"
                 system_prompt = f"Summarize the following conversation in one short sentence (less then 5 word) that clearly conveys the user's main intent or request. Be specific and avoid vague or generic summaries. The user is from {country}.You should use the language of the user."
-                model = generativeai.GenerativeModel(
+                model = genai.GenerativeModel(
                 model_name='gemini-2.5-flash',  
                 system_instruction=system_prompt
                 )
@@ -492,51 +464,29 @@ class ChatSessionPutView(APIView):
 
             else:
                 model_output = response.text
-
-            if is_search:
-                citations = []
-                titles = []
-                chunks = response.candidates[0].grounding_metadata.grounding_chunks
-                if chunks:
+                if is_search:
+                    citations = []
+                    titles = []
+                    chunks = response.candidates[0].grounding_metadata.grounding_chunks
                     for chunk in chunks:
-                        uri = chunk.web.uri
-                        title = chunk.web.title
-                        citations.append(uri)
+                        uri = chunk['web']['uri']
+                        title = chunk['web']['title']
+                        citation.append(uri)
                         titles.append(title)
-
 
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # 메시지 저장
         #___________________________________________________________________________________
-        message = Message.objects.create(session=session, 
+        Message.objects.create(session=session, 
             sender='user',
             message=user_input, 
             order=order, 
+            image=image_file if image_file else None, 
+            file=file if file else None,
+            audio=audio_file if audio_file else None,
             is_workflow=is_workflow)
-
-        if images:
-            for image in images:
-                Image.objects.create(
-                    message=message,
-                    image=image,
-                    caption=""
-                )
-        if files:
-            for file in files:
-                File.objects.create(
-                    message=message,
-                    file=file,
-                    description=""
-                )
-        if audios:
-            for audio in audios:
-                Audio.objects.create(
-                    message=message,
-                    audio=audio,
-                    description=""
-                )
 
         if is_search:
             output = Message.objects.create(
@@ -544,8 +494,11 @@ class ChatSessionPutView(APIView):
                 sender='model', 
                 message=model_output, 
                 order=order + 1,
+                image=None, 
+                file=None, 
+                audio=None
             )
-            search_result = list(zip(citations, titles))
+            search_result = zip(citations, titles)
             for (citation, title) in search_result:
                 Citation.objects.create(
                     message=output, 
@@ -556,15 +509,17 @@ class ChatSessionPutView(APIView):
             Message.objects.create(session=session, 
                 sender='model', 
                 message=model_output,
-                order=order + 1,)
-            search_result = []
+                order=order + 1, 
+                image=None, 
+                file=None,
+                audio=None)
 
         # 만약 처음 생성하는 워크플로우가 아닌 메세지라면, 메세지 요약본을 생성해 저장.
         if order == 0 and not session.is_workflow:
             user = session.user
             country = user.country.name if user.country else "Unknown"
             system_prompt = f"Summarize the following conversation in one short sentence (less then 5 word) that clearly conveys the user's main intent or request. Be specific and avoid vague or generic summaries. The user is from {country}."
-            model = generativeai.GenerativeModel(
+            model = genai.GenerativeModel(
             model_name='gemini-2.5-flash',  
             system_instruction=system_prompt
             )
@@ -575,7 +530,6 @@ class ChatSessionPutView(APIView):
 
         # 모델 응답 전송
         #____________________________________________________________________________________
-
         if session.is_workflow:
             model_output = re.split(r"\d+:", model_output)
             model_output = [output.strip() for output in model_output if output.strip()]
@@ -587,4 +541,16 @@ class ChatSessionPutView(APIView):
 
 
 
-    
+"""ChatSessionView Request Body 예시
+{
+    "session_id": 1,  # 세션 아이디 (없으면 새로 생성)
+    "user_input": "미적분학에 대해서 알려줘",  # 유저 입력
+    "is_workflow": False,  # 워크플로우 여부 (선택 사항)
+    "character_id": 1,  # 캐릭터 아이디 (선택 사항)
+    "user_id": 1  # 유저 아이디 (선택 사항)
+    "image": null,  # 이미지 파일 (선택 사항)
+    "file": null,  # 파일 업로드 (선택 사항)
+    "audio": null,  # 오디오 파일 업로드 (선택 사항)
+    "is_search": false,  # 검색 기능 사용 여부 (선택 사항)
+}
+"""

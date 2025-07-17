@@ -37,10 +37,40 @@ class Message(models.Model):
     sender = models.CharField(max_length=10, choices=SENDER_CHOICES)
     message = models.TextField()
     order = models.IntegerField()
-    image = models.ImageField(upload_to='chat_images/', blank=True, null=True)
-    file = models.FileField(upload_to='chat_files/', blank=True, null=True)
-    audio = models.FileField(upload_to='chat_audio/', blank=True, null=True)
     is_workflow = models.BooleanField(default=False)
+
+class Image(models.Model):
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='images')
+    image = models.ImageField(upload_to='chat_images/')
+    caption = models.CharField(max_length=255, blank=True, null=True)
+    def delete(self, *args, **kwargs):
+        # ① 파일 삭제
+        if self.image:
+            self.image.delete(save=False)
+        # ② DB 레코드 삭제
+        super().delete(*args, **kwargs)
+
+class File(models.Model):
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='files')
+    file = models.FileField(upload_to='chat_files/')
+    description = models.CharField(max_length=255, blank=True, null=True)
+    def delete(self, *args, **kwargs):
+    # ① 파일 삭제
+        if self.file:
+            self.file.delete(save=False)
+        # ② DB 레코드 삭제
+        super().delete(*args, **kwargs)
+
+class Audio(models.Model):
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='audios')
+    audio = models.FileField(upload_to='chat_audio/')
+    transcript = models.TextField(blank=True, null=True)
+    def delete(self, *args, **kwargs):
+        # ① 파일 삭제
+        if self.audio:
+            self.audio.delete(save=False)
+        # ② DB 레코드 삭제
+        super().delete(*args, **kwargs)
 
 class Citation(models.Model):
     message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name='citations')
