@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'django_countries',
     'corsheaders',
     'slab',
+    'call',
     'rest_framework',
 ]
 

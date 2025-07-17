@@ -2,7 +2,7 @@ from django.db import models
 from chat.models import Message
 from character.models import Character
 from user.models import UserProfile
-
+from django.utils import timezone
 
 # Create your models here.
 class CallSession(models.Model):

@@ -141,7 +141,7 @@ class ChatSessionPostView(APIView):
         talk_prompts = """
         You are doing a call with a user. 
         Answer to the audio file like you are talking to the user on the phone.
-        """"
+        """
         if is_workflow:
             system_prompt += "\n" + workflow_prompts
 
