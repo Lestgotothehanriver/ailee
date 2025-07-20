@@ -16,12 +16,16 @@ from google.genai import types
 from google import genai
 from google.genai.types import Part, Content
 #___________________________________________________________________________________
+from qdrant_client import QdrantClient
+from qdrant_client.models import PointStruct
+#___________________________________________________________________________________
 from dotenv import load_dotenv
 import os
 import re
-import base64
 import mimetypes
+import threading
 from distutils.util import strtobool
+import uuid
 load_dotenv() 
 generativeai.configure(api_key=os.environ["GEMINI_API_KEY"])
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
@@ -43,6 +47,34 @@ workflow_prompts = """당신에게 주어진 과제는 다음과 같습니다.
 선택지 전의 글은 반드시 3줄 넘게 작성하지 않도록 합니다. 
 “start!” 라는 문자열이 입력된다면, 당신은 현재 목표를 달성하기 위한 질문을 시작해야 합니다.}"""
 
+search_prompt = """유저의 메시지를 읽고, 다음 두 가지를 판단해, 경우에 따라 문자열 “True” 또는 “False”를 출력해 주세요.
+해당 메시지가 데이터베이스에서 유저의 성향, 취향, 관심사, 개인적인 정보 등 추가적인 사용자의 정보를 검색해 와야 한다면 True, 아닌 경우에는 False를 출력해 주세요. 
+Ex:
+“지금까지의 대화 내용을 바탕으로 내 성향을 분석해줘” > “True”
+“내가 그때 이야기했던 친구 기억나?” > “True”
+“트랜스포머에 대해서 알려줘” > “False”
+“케이팝 데몬 헌터스에 대해 검색해서 알려줘” > “False”
+주의사항: 당신은 반드시 "True", 혹은 "False"만 출력해야 하고, 그 이외의 출력은 허용하지 않습니다."""
+
+embed_prompt = """당신은 언어 모델의 개인화된 답변을 제공하기 위해, 사용자 맞춤 메모리 데이터베이스를 구축하는 AI입니다. 
+당신의 역할은, 유저가 입력한 메세지를 읽고, 해당 메시지가 데이터베이스에 저장할 만한 가치가 있는지 판단하는 것입니다.
+당신이 출력해야 할 문자열은 “True”와 “False”입니다.
+유저의 성향, 취향, 관심사 등을 나타내는 정보가 포함되어 있다면, 해당 메시지를 데이터베이스에 저장할 만한 가치가 있다고 판단하고, “True”를 출력하세요.
+아니라면, “False”를 출력하세요.
+출력 예시: 
+나 요즘에 좋아하는 애가 있어. 그 아이 이름은 지우야. > True
+오늘 점심 짜장면 먹을까 짬뽕 먹을까? > False
+주의사항: 당신은 반드시 "True", 혹은 "False"만 출력해야 하고, 그 이외의 출력은 허용하지 않습니다."""
+
+user_system_prompt = """사용자의 기본 정보는 다음과 같습니다. 사용자의 성향과 정보의 맞춰 적절한 응답을 생성해 주세요.
+1. 이름: {이름}
+2. 생년월일:{생년월일}
+3. 직업: {직업}
+4. 성향: 
+에너지의 방향: 내향형 {n}퍼센트, 외향형 {n}퍼센트
+인식 방식: 감각형(내 앞의 일에 집중하는) {n}퍼센트, 직관형(상상력이 풍부한) {n}퍼센트
+결정 방식: 사고형 {n}퍼센트, 감정형 {n}퍼센트
+삶의 패턴: 계획형 {n}퍼센트, 즉흥형 {n}퍼센트"""
 
 def to_bool(val):
     if val in (True, False, None):
@@ -140,8 +172,8 @@ class ChatSessionPostView(APIView):
         is_workflow = to_bool(request.data.get('is_workflow', None))  # 워크플로우 여부
         is_search = to_bool(request.data.get('is_search', False))  # 검색 여부 (선택 사항)
         images = request.FILES.getlist('images', None)  # 이미지 파일 (선택 사항)
-        files = request.FILES.get('files', None)  # 파일 업로드 (선택 사항)
-        audios = request.FILES.get('audios', None)  # 오디오 파일 업로드 (선택 사항)
+        files = request.FILES.getlist('files', None)  # 파일 업로드 (선택 사항)
+        audios = request.FILES.getlist('audios', None)  # 오디오 파일 업로드 (선택 사항)
 
         # 세션 생성 혹은 호출 단계
         #___________________________________________________________________________________
@@ -183,17 +215,17 @@ class ChatSessionPostView(APIView):
                     #___________________________________________________________________________________
                     if m.files:
                         for file in m.files.all():
-                            with open(m.file.path, 'rb') as file_obj:
+                            with open(file.file.path, 'rb') as file_obj:
                                 file_bytes = file_obj.read()
-                            mime_type = mimetypes.guess_type(m.file.path)[0]
+                            mime_type = mimetypes.guess_type(file.file.path)[0]
                             file_data = types.Part.from_bytes(data=file_bytes, mime_type= mime_type)
                             parts.append(file_data)
                     #___________________________________________________________________________________
                     if m.audios:
                         for audio in m.audios.all():
-                            with open(m.audio.path, 'rb') as audio_obj:
+                            with open(audio.audio.path, 'rb') as audio_obj:
                                 audio_bytes = audio_obj.read()
-                            mime_type = mimetypes.guess_type(m.audio.path)[0]
+                            mime_type = mimetypes.guess_type(audio.audio.path)[0]
                             audio_data = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
                             parts.append(audio_data)
                     #___________________________________________________________________________________
@@ -279,7 +311,6 @@ class ChatSessionPostView(APIView):
                         citations.append(uri)
                         titles.append(title)
 
-
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -359,29 +390,26 @@ class ChatSessionPostView(APIView):
             model_output = [model_output]
 
         return Response({'response': model_output, 'session_id': session_id, 'is_workflow': session.is_workflow, 'search_result': search_result}, status=status.HTTP_200_OK)
-
-
-#___________________________________________________________________________________
-class ChatSessionPutView(APIView):
-
-    """ 챗 메시지를 수정하는 뷰 """
-    parser_classes = (MultiPartParser, FormParser)
-
-    def put(self, request, session_id, order):
+    
+    
+    #____________________________________________________________________________________
+    def put(self, request):
         """
         Role: 프론트엔드에서 특정 챗 세션의 메시지를 수정해, 이후의 대화 (order 기준) 내역을 삭제한뒤, 해당 메시지에 대한 새로운 응답을 생성해 반환함.
-        URL : /api/chat/sessions/<int:session_id>/<int:order>/
+        URL : /api/chat/sessions/
         Input: URL 형식으로 해당 세션의 아이디 (session_id)와 해당 세션에서의 order를 전달하고, Request body로 수정할 메시지 내용을 전달합니다. 
         Return: 성공적으로 수정되었다는 메시지를 반환합니다.
         """
 
         # 필요한 파라미터 설정
         #___________________________________________________________________________________
+        session_id = request.data.get('session_id')
         user_input = request.data.get('user_input')
         is_search = request.data.get('is_search', False)  # 검색 여부 (선택 사항)
-        images = request.FILES.get('images', None)  # 이미지 파일 (선택 사항)
-        files = request.FILES.get('files', None)  # 파일 업로드 (선택 사항)
-        audios = request.FILES.get('audios', None)  # 오디오 파일 업로드 (선택 사항)
+        images = request.FILES.getlist('images', None)  # 이미지 파일 (선택 사항)
+        files = request.FILES.getlist('files', None)  # 파일 업로드 (선택 사항)
+        audios = request.FILES.getlist('audios', None)  # 오디오 파일 업로드 (선택 사항)
+        order = request.data.get('order', 0)  # 메시지 순서 (기본값은 0)
 
         # 수정 메시지 기준 이후 메시지들을 삭제하고 대화 히스토리 호출
         #___________________________________________________________________________________
@@ -584,7 +612,3 @@ class ChatSessionPutView(APIView):
             model_output = [model_output]
 
         return Response({'response': model_output, 'session_id': session_id, 'is_workflow': session.is_workflow, 'search_result': search_result}, status=status.HTTP_200_OK)
-
-
-
-    

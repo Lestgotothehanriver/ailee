@@ -72,7 +72,7 @@ class CallSessionGetView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 #___________________________________________________________________________________
-class ChatSessionPostView(APIView):
+class CallSessionPostView(APIView):
 
     """ 새로운 콜 세션을 생성하는 API 뷰 """
     parser_classes = (JSONParser, MultiPartParser, FormParser)
