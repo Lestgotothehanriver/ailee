@@ -8,7 +8,7 @@ class Command(BaseCommand):
     def handle(self, *args, **kwargs):
         client = QdrantClient(host="localhost", port=6333)
         client.recreate_collection(
-            collection_name="chat_messages",
+            collection_name="chat_memory",
             vectors_config=VectorParams(
                 size=768, #The size of the embedding vector based on gemini-embedding-001
                 distance="Cosine"

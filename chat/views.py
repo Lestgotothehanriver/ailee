@@ -25,12 +25,14 @@ import re
 import mimetypes
 import threading
 from distutils.util import strtobool
+import numpy
+from numpy.linalg import norm
 import uuid
 load_dotenv() 
 generativeai.configure(api_key=os.environ["GEMINI_API_KEY"])
 client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 #___________________________________________________________________________________
-# Create your views here.
+# system prompts
 
 workflow_prompts = """당신에게 주어진 과제는 다음과 같습니다.
 {
@@ -47,7 +49,7 @@ workflow_prompts = """당신에게 주어진 과제는 다음과 같습니다.
 선택지 전의 글은 반드시 3줄 넘게 작성하지 않도록 합니다. 
 “start!” 라는 문자열이 입력된다면, 당신은 현재 목표를 달성하기 위한 질문을 시작해야 합니다.}"""
 
-search_prompt = """유저의 메시지를 읽고, 다음 두 가지를 판단해, 경우에 따라 문자열 “True” 또는 “False”를 출력해 주세요.
+user_context_prompt = """유저의 메시지를 읽고, 다음 두 가지를 판단해, 경우에 따라 문자열 “True” 또는 “False”를 출력해 주세요.
 해당 메시지가 데이터베이스에서 유저의 성향, 취향, 관심사, 개인적인 정보 등 추가적인 사용자의 정보를 검색해 와야 한다면 True, 아닌 경우에는 False를 출력해 주세요. 
 Ex:
 “지금까지의 대화 내용을 바탕으로 내 성향을 분석해줘” > “True”
@@ -56,10 +58,17 @@ Ex:
 “케이팝 데몬 헌터스에 대해 검색해서 알려줘” > “False”
 주의사항: 당신은 반드시 "True", 혹은 "False"만 출력해야 하고, 그 이외의 출력은 허용하지 않습니다."""
 
+search_prompt = """유저의 메시지를 읽고, 다음 두 가지를 판단해, 경우에 따라 문자열 “True” 또는 “False”를 출력해 주세요.
+해당 메시지가 최신 정보를 검색해 와야 한다면 True, 아닌 경우에는 False를 출력해 주세요.
+Ex:
+"케데헌에 대해 알려줘" > "True"
+"미적분학에 대해서 알려줘" > "False"
+주의사항: 당신은 반드시 "True", 혹은 "False"만 출력해야 하고, 그 이외의 출력은 허용하지 않습니다."""
+
 embed_prompt = """당신은 언어 모델의 개인화된 답변을 제공하기 위해, 사용자 맞춤 메모리 데이터베이스를 구축하는 AI입니다. 
 당신의 역할은, 유저가 입력한 메세지를 읽고, 해당 메시지가 데이터베이스에 저장할 만한 가치가 있는지 판단하는 것입니다.
 당신이 출력해야 할 문자열은 “True”와 “False”입니다.
-유저의 성향, 취향, 관심사 등을 나타내는 정보가 포함되어 있다면, 해당 메시지를 데이터베이스에 저장할 만한 가치가 있다고 판단하고, “True”를 출력하세요.
+유저의 성향, 취향, 관심사, 개인 정보등을 나타내는 정보가 포함되어 있다면, 해당 메시지를 데이터베이스에 저장할 만한 가치가 있다고 판단하고, “True”를 출력하세요.
 아니라면, “False”를 출력하세요.
 출력 예시: 
 나 요즘에 좋아하는 애가 있어. 그 아이 이름은 지우야. > True
@@ -76,6 +85,9 @@ user_system_prompt = """사용자의 기본 정보는 다음과 같습니다. �
 결정 방식: 사고형 {n}퍼센트, 감정형 {n}퍼센트
 삶의 패턴: 계획형 {n}퍼센트, 즉흥형 {n}퍼센트"""
 
+#___________________________________________________________________________________ 
+# 유틸리티 함수들
+
 def to_bool(val):
     if val in (True, False, None):
         return val
@@ -83,6 +95,144 @@ def to_bool(val):
         return bool(strtobool(str(val).strip()))
     except ValueError:
         return None  
+
+def get_embedding(text:str, is_query:bool) -> list[float]:
+    if is_query:
+        task_type = "RETRIEVAL_QUERY"
+    else:
+        task_type = "RETRIEVAL_DOCUMENT"
+    response = client.models.embed_content(
+        model = "gemini-embedding-001",
+        contents = text,
+        config = types.EmbedContentConfig(
+            task_type = task_type, output_dimensionality = 768,  
+        ))
+    [embedding_obj] = response.embeddings
+    embedding_values_np = numpy.array(embedding_obj.values)
+    normed_embedding = embedding_values_np / norm(embedding_values_np)
+    return normed_embedding.tolist() 
+
+def vectorize_and_store(message: Message):
+    """
+    Role: 메시지를 벡터화하고, Qdrant에 저장하는 함수
+    argument: Message 객체
+    Return: None
+    """
+    vector = get_embedding(message.message, is_query=False)
+    client = QdrantClient(host="localhost", port=6333)  
+    client.upsert(
+        collection_name="chat_memory",
+        points=[
+            PointStruct(
+                id=str(uuid.uuid4()),  
+                vector=vector,
+                payload={
+                    "text": message.message,
+                    "user_id": message.session.user.id,
+                    "session_id": message.session.id,
+                }
+            )
+        ]
+    )
+
+def is_embed_node(message: Message, embed_prompt: str, user_input: str, client: genai.Client):
+    """
+    Role:
+    사용자의 메시지가 벡터화가 필요한지 판단하는 함수
+    arguments:
+        message: Message 객체
+        embed_prompt: 벡터화 여부를 판단하기 위한 프롬프트
+        user_input: 사용자의 입력 메시지
+        client: genai.Client 객체
+    Return: bool - 벡터화가 필요한 경우 True, 아닌 경우 False
+    """
+    embed_agent_config = types.GenerateContentConfig(
+            system_instruction=embed_prompt,
+        )
+    embed_agent_parts = [Part(text=user_input)]
+    embed_agent_contents = [
+        Content(role="user", parts=embed_agent_parts)
+    ]
+    embed_agent_response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        config=embed_agent_config,
+        contents=embed_agent_contents
+    )
+    return embed_agent_response.text == "True" 
+
+def embed_task(message: Message, embed_prompt: str, user_input: str, client: genai.Client):
+    if is_embed_node(message, embed_prompt, user_input, client):
+        vectorize_and_store(message)
+
+def is_user_context_required(user_input: str, client: genai.Client) -> bool:
+    """
+    Role: 사용자의 입력이 Qdrant에서 벡터 검색을 수행해야 하는지 판단하는 함수
+    arguments:
+        user_input: 사용자의 입력 메시지
+        client: genai.Client 객체
+    Return: bool - 검색이 필요한 경우 True, 아닌 경우 False
+    """
+    search_agent_config = types.GenerateContentConfig(
+        system_instruction=user_context_prompt,
+    )
+    search_agent_parts = [Part(text=user_input)]
+    search_agent_contents = [
+        Content(role="user", parts=search_agent_parts)
+    ]
+    search_agent_response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        config=search_agent_config,
+        contents=search_agent_contents
+    )
+    return search_agent_response.text == "True"
+
+def user_context_node(query_text: str, user_id: int):
+    """
+    Role: 사용자의 입력이 대해, 사용자의 개인 정보가 필요한 경우, Qdrant에서 
+    벡터 검색을 수행해 가장 관련성 높은 정보를 반환하는 함수
+    arguments:
+        query_text: 사용자의 입력 메시지
+        user_id: 사용자의 ID
+    Return: List[ScoredPoint] - Qdrant에서 검색된 결과
+    각 ScoredPoint 객체는 다음과 같은 정보를 포함한다.
+        - id: 검색된 벡터의 ID
+        - score: 검색된 벡터의 점수
+        - payload: 검색된 벡터의 페이로드 (메시지 내용, 유저 ID, 세션 ID 등)
+    """
+    client = QdrantClient(host="localhost", port=6333)
+    search_result = client.search(
+        collection_name="chat_memory",
+        query_vector=get_embedding(query_text, is_query=True),
+        limit=20,
+        query_filter={
+            "must": [
+                {"key": "user_id", "match": {"value": user_id}}
+            ]
+        }
+    )
+    return search_result
+
+def is_search_required(user_input: str, client: genai.Client) -> bool:
+    """
+    Role: 사용자의 입력이 최신 정보를 검색해야 하는지 판단하는 함수
+    arguments:
+        user_input: 사용자의 입력 메시지
+        client: genai.Client 객체
+    Return: bool - 검색이 필요한 경우 True, 아닌 경우 False
+    """
+    search_agent_config = types.GenerateContentConfig(
+        system_instruction=search_prompt,
+    )
+    search_agent_parts = [Part(text=user_input)]
+    search_agent_contents = [
+        Content(role="user", parts=search_agent_parts)
+    ]
+    search_agent_response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        config=search_agent_config,
+        contents=search_agent_contents
+    )
+    return search_agent_response.text == "True"
 
 #___________________________________________________________________________________        
 class ChatView(APIView):
@@ -238,6 +388,13 @@ class ChatSessionPostView(APIView):
         if is_workflow:
             system_prompt += "\n" + workflow_prompts
 
+        if is_user_context_required(user_input, client):
+            search_result = user_context_node(user_input, session.user.id)
+            if search_result:
+                user_context = " ".join([point.payload['text'] for point in search_result])
+                system_prompt += f"\n\n유저가 당신에게 했던 질문들은 다음과 같습니다. 이 질문들에 담긴 유저의 성향, 데이터 등을 참고해 알맞는 응답을 생성해 주세요: {user_context}"
+
+        is_search = is_search or is_search_required(user_input, client)
         if is_search:
             # Define the grounding tool
             grounding_tool = types.Tool(
@@ -285,13 +442,15 @@ class ChatSessionPostView(APIView):
                 user = session.user
                 country = user.country.name if user.country else "Unknown"
                 system_prompt = f"Summarize the following conversation in one short sentence (less then 5 word) that clearly conveys the user's main intent or request. Be specific and avoid vague or generic summaries. The user is from {country}.You should use the language of the user."
-                model = generativeai.GenerativeModel(
-                model_name='gemini-2.5-flash',  
-                system_instruction=system_prompt
-                )
-                summary_chat = model.start_chat()
-                summary_response = summary_chat.send_message(model_output)
-                session.summary = summary_response.text
+                config = types.GenerateContentConfig(
+                    system_instruction=system_prompt
+                    )
+                summary = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=[Content(role="model", parts=[Part(text=model_output)])],
+                    config=config
+                    )
+                session.summary = summary.text
                 first_message = session.message_set.filter(order=0).first()
                 if first_message:
                     first_message.delete()
@@ -370,13 +529,15 @@ class ChatSessionPostView(APIView):
             user = session.user
             country = user.country.name if user.country else "Unknown"
             system_prompt = f"Summarize the following conversation in one short sentence (less then 5 word) that clearly conveys the user's main intent or request. Be specific and avoid vague or generic summaries. The user is from {country}."
-            model = generativeai.GenerativeModel(
-            model_name='gemini-2.5-flash',  
-            system_instruction=system_prompt
+            config = types.GenerateContentConfig(
+                system_instruction=system_prompt
+                )
+            summary = client.models.generate_content(
+                model="gemini-2.5-flash",  
+                contents=[Content(parts=[Part(text=model_output)])],
+                config=config
             )
-            summary_chat = model.start_chat()
-            summary_response = summary_chat.send_message(model_output)
-            session.summary = summary_response.text
+            session.summary = summary.text
             session.save() 
 
         # 모델 응답 전송
@@ -388,6 +549,8 @@ class ChatSessionPostView(APIView):
 
         else: 
             model_output = [model_output]
+
+        threading.Thread(target=embed_task, args=(message, embed_prompt, user_input, client), daemon=True).start()
 
         return Response({'response': model_output, 'session_id': session_id, 'is_workflow': session.is_workflow, 'search_result': search_result}, status=status.HTTP_200_OK)
     
